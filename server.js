@@ -38,57 +38,132 @@ if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, '[]');
 const readAll = () => { try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch { return []; } };
 const saveAll = (list) => fs.writeFileSync(DATA_FILE, JSON.stringify(list, null, 2));
 
-// ---------- Optional email (nodemailer) ----------
-// ---------- Optional email (nodemailer) ----------
+// ---------- Email Notification Engine (HTTP API + SMTP) ----------
+// Note on Cloud Deployment (Render / Vercel / Railway / AWS):
+// Render Free tier blocks outbound SMTP ports 25, 465, and 587.
+// To send emails with 100% reliability on Render:
+// Option 1 (Recommended & Free): Set RESEND_API_KEY (from resend.com - 3000 emails/mo free)
+// Option 2 (Free): Set BREVO_API_KEY (from brevo.com - 300 emails/day free)
+// Option 3: Standard Gmail/SMTP via GMAIL_USER + GMAIL_APP_PASSWORD (for local dev or paid Render)
 
 let transporter = null;
 
-if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-
+if (process.env.RESEND_API_KEY) {
+  console.log('✉️ Email notifications enabled via Resend HTTP API (Render Cloud Ready)');
+} else if (process.env.BREVO_API_KEY) {
+  console.log('✉️ Email notifications enabled via Brevo HTTP API (Render Cloud Ready)');
+} else if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
   const nodemailer = require('nodemailer');
-
   transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,
     requireTLS: true,
-    family: 4,
-
+    family: 4, // Force IPv4
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
     auth: {
       user: process.env.GMAIL_USER,
       pass: process.env.GMAIL_APP_PASSWORD.replace(/\s+/g, ''),
     },
-
     tls: {
       rejectUnauthorized: true,
     },
   });
-
-  console.log(
-    '✉️ Gmail notifications enabled for ' + process.env.GMAIL_USER
-  );
-
+  console.log('✉️ Gmail SMTP notifications enabled for ' + process.env.GMAIL_USER);
 } else if (process.env.SMTP_HOST && process.env.SMTP_USER) {
-
   const nodemailer = require('nodemailer');
-
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
     secure: Number(process.env.SMTP_PORT) === 465,
-    family: 4,
-
+    family: 4, // Force IPv4
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
-
     tls: {
       rejectUnauthorized: true,
     },
   });
+  console.log('✉️ Custom SMTP notifications enabled');
+}
 
-  console.log('✉️ Email notifications enabled');
+async function sendEmailViaResend({ to, replyTo, subject, html, text }) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const fromEmail = process.env.MAIL_FROM || 'Bhakti Construction <onboarding@resend.dev>';
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: Array.isArray(to) ? to : [to],
+      reply_to: replyTo || undefined,
+      subject,
+      html,
+      text,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || data.error?.message || JSON.stringify(data));
+  }
+  return data;
+}
+
+async function sendEmailViaBrevo({ to, replyTo, subject, html, text }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  const senderEmail = process.env.BREVO_SENDER_EMAIL || process.env.MAIL_FROM || 'bhakticonstructions98@gmail.com';
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': apiKey,
+      'Content-Type': 'application/json',
+      'accept': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: 'Bhakti Construction', email: senderEmail },
+      to: (Array.isArray(to) ? to : [to]).map((email) => ({ email })),
+      replyTo: replyTo ? { email: replyTo } : undefined,
+      subject,
+      htmlContent: html,
+      textContent: text,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || JSON.stringify(data));
+  }
+  return data;
+}
+
+async function dispatchEmail({ to, replyTo, subject, html, text, attachments = [] }) {
+  if (process.env.RESEND_API_KEY) {
+    return sendEmailViaResend({ to, replyTo, subject, html, text });
+  }
+  if (process.env.BREVO_API_KEY) {
+    return sendEmailViaBrevo({ to, replyTo, subject, html, text });
+  }
+  if (transporter) {
+    const sender = process.env.GMAIL_USER || process.env.SMTP_USER;
+    return transporter.sendMail({
+      from: `"Bhakti Construction" <${sender}>`,
+      to,
+      replyTo: replyTo || undefined,
+      subject,
+      text,
+      html,
+      attachments,
+    });
+  }
+  return null;
 }
 
 app.use(express.json({ limit: '50kb' }));
@@ -140,9 +215,12 @@ app.post('/api/enquiry', rateLimit, async (req, res) => {
   saveAll(list);
   console.log(`📩 New enquiry from ${entry.name} (${entry.phone}) – ${entry.service}`);
 
-  if (transporter) {
-    const sender = process.env.GMAIL_USER || process.env.SMTP_USER;
-    const recipient = process.env.MAIL_TO || sender;
+  const emailEnabled = Boolean(process.env.RESEND_API_KEY || process.env.BREVO_API_KEY || transporter);
+
+  if (emailEnabled) {
+    const defaultAdminEmail = 'bhakticonstructions98@gmail.com';
+    const recipient = process.env.MAIL_TO || defaultAdminEmail;
+    const sender = process.env.MAIL_FROM || process.env.GMAIL_USER || process.env.SMTP_USER || 'onboarding@resend.dev';
     const logoPath = path.join(__dirname, 'public', 'images', 'logo-200.png');
     const attachments = fs.existsSync(logoPath) ? [{
       filename: 'logo.png',
@@ -151,13 +229,17 @@ app.post('/api/enquiry', rateLimit, async (req, res) => {
     }] : [];
 
     const hostUrl = `${req.protocol}://${req.get('host')}`;
+    const logoSrc = (process.env.RESEND_API_KEY || process.env.BREVO_API_KEY)
+      ? `${hostUrl}/images/logo-200.png`
+      : 'cid:bhakti-logo';
+
     const adminMail = renderAdminEnquiryEmail(entry, {
       adminUrl: `${hostUrl}/admin`,
+      logoSrc,
     });
 
     // 1. Send luxury branded lead notification to Admin / Business
-    transporter.sendMail({
-      from: `"Bhakti Construction" <${sender}>`,
+    dispatchEmail({
       to: recipient,
       replyTo: entry.email || undefined,
       subject: adminMail.subject,
@@ -166,13 +248,19 @@ app.post('/api/enquiry', rateLimit, async (req, res) => {
       attachments,
     })
       .then(() => console.log(`✉️  Lead notification email sent to ${recipient}`))
-      .catch((e) => console.error('Admin email failed:', e.message));
+      .catch((e) => {
+        console.error('Admin email failed:', e.message);
+        if (e.message.includes('ENETUNREACH') || e.message.includes('timeout')) {
+          console.warn('💡 Tip: Cloud hosts like Render Free Tier block SMTP ports 587/465. To send emails reliably on Render, set RESEND_API_KEY (from resend.com) in Render environment variables.');
+        }
+      });
 
     // 2. If client provided an email address, send an elegant confirmation / thank you email
     if (entry.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry.email)) {
-      const custMail = renderCustomerConfirmationEmail(entry);
-      transporter.sendMail({
-        from: `"Bhakti Construction" <${sender}>`,
+      const custMail = renderCustomerConfirmationEmail(entry, {
+        logoSrc,
+      });
+      dispatchEmail({
         to: entry.email,
         replyTo: recipient,
         subject: custMail.subject,

@@ -20,6 +20,22 @@ npm start          # http://localhost:3000
 ## Environment variables (optional)
 | Var | Purpose |
 |---|---|
-| `PORT` | Server port (default 3000) |
-| `ADMIN_USER`, `ADMIN_PASSWORD` | Admin login |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_TO` | Email each enquiry to you (e.g. Gmail: smtp.gmail.com / 587 / app password) |
+| `PORT` | Server port (default 3000 / Render sets automatically) |
+| `ADMIN_USER`, `ADMIN_PASSWORD` | Admin login (default: admin / bhakti@123) |
+| `RESEND_API_KEY` | **Recommended for Render** (Free from [resend.com](https://resend.com)) – sends over HTTPS port 443, never blocked by Render |
+| `MAIL_TO` | Email address where you want to receive new leads (e.g. `bhakticonstructions98@gmail.com`) |
+| `MAIL_FROM` | Sender address (e.g. `Bhakti Construction <onboarding@resend.dev>` or your domain) |
+| `BREVO_API_KEY` | Alternative HTTP API for Render (Free from [brevo.com](https://brevo.com)) |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Gmail SMTP (works for local development or Render paid plans) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | Custom SMTP settings |
+
+## 🚀 Deploying to Render & Email Setup
+1. Render Free Tier blocks outbound SMTP ports (`25`, `465`, `587`). Direct Gmail SMTP will fail with `Connection timeout` or `ENETUNREACH`.
+2. **Fix (100% Free & Takes 1 minute)**:
+   - Create a free account at [Resend](https://resend.com) (gives 3,000 emails/month free).
+   - Generate an API Key (starts with `re_...`).
+   - In your **Render Dashboard** → Your Web Service → **Environment Variables**:
+     - `RESEND_API_KEY` = `re_xxxxxxxxxxxx`
+     - `MAIL_TO` = `bhakticonstructions98@gmail.com`
+   - Render will automatically restart and emails will deliver in real time without any port issues!
+
