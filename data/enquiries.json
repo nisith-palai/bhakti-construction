@@ -1,1 +1,28 @@
-[]
+[
+  {
+    "id": "4687cb72-dc14-46ac-a7b8-36212273ea17",
+    "name": "Bhaktipada Sahoo",
+    "phone": "9937828100",
+    "email": "",
+    "service": "Renovation",
+    "location": "Bhubaneswar",
+    "budget": "",
+    "message": "",
+    "source": "hero-quick-form",
+    "createdAt": "2026-09-30T14:04:17.170Z",
+    "status": "new"
+  },
+  {
+    "id": "d50e38d9-d30e-4158-81f3-6ba490d391b2",
+    "name": "Ram",
+    "phone": "9937828100",
+    "email": "",
+    "service": "Farm Land Development",
+    "location": "Bhubaneswar",
+    "budget": "",
+    "message": "",
+    "source": "hero-quick-form",
+    "createdAt": "2026-09-30T13:58:02.789Z",
+    "status": "new"
+  }
+]

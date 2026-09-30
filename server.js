@@ -12,6 +12,10 @@
  *   ADMIN_USER=admin   ADMIN_PASSWORD=bhakti@123
  *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_TO   (for email notifications)
  */
+try { require('dotenv').config(); } catch (_) {}
+const dns = require('dns');
+if (dns.setDefaultResultOrder) dns.setDefaultResultOrder('ipv4first');
+
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -32,13 +36,33 @@ const saveAll = (list) => fs.writeFileSync(DATA_FILE, JSON.stringify(list, null,
 
 // ---------- Optional email (nodemailer) ----------
 let transporter = null;
-if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+  const nodemailer = require('nodemailer');
+  transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    family: 4, // Force IPv4 to prevent IPv6 ECONNREFUSED issues on ISP/router
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD.replace(/\s+/g, ''),
+    },
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
+  console.log('✉️  Gmail notifications enabled for ' + process.env.GMAIL_USER);
+} else if (process.env.SMTP_HOST && process.env.SMTP_USER) {
   const nodemailer = require('nodemailer');
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
     secure: Number(process.env.SMTP_PORT) === 465,
+    family: 4,
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    tls: {
+      rejectUnauthorized: false,
+    },
   });
   console.log('✉️  Email notifications enabled');
 }
@@ -93,13 +117,16 @@ app.post('/api/enquiry', rateLimit, async (req, res) => {
   console.log(`📩 New enquiry from ${entry.name} (${entry.phone}) – ${entry.service}`);
 
   if (transporter) {
+    const sender = process.env.GMAIL_USER || process.env.SMTP_USER;
     transporter.sendMail({
-      from: `"Bhakti Construction Website" <${process.env.SMTP_USER}>`,
-      to: process.env.MAIL_TO || process.env.SMTP_USER,
+      from: `"Bhakti Construction Website" <${sender}>`,
+      to: process.env.MAIL_TO || sender,
       replyTo: entry.email || undefined,
       subject: `New Enquiry: ${entry.service} – ${entry.name}`,
       text: Object.entries(entry).map(([k, v]) => `${k}: ${v}`).join('\n'),
-    }).catch((e) => console.error('Email failed:', e.message));
+    })
+      .then(() => console.log(`✉️  Notification email sent to ${process.env.MAIL_TO || sender}`))
+      .catch((e) => console.error('Email failed:', e.message));
   }
 
   res.json({ ok: true, message: `Thank you ${entry.name.split(' ')[0]}! Your enquiry has been received. Our team will call you shortly.` });
