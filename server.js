@@ -39,36 +39,56 @@ const readAll = () => { try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8
 const saveAll = (list) => fs.writeFileSync(DATA_FILE, JSON.stringify(list, null, 2));
 
 // ---------- Optional email (nodemailer) ----------
+// ---------- Optional email (nodemailer) ----------
+
 let transporter = null;
+
 if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+
   const nodemailer = require('nodemailer');
+
   transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    family: 4, // Force IPv4 to prevent IPv6 ECONNREFUSED issues on ISP/router
+    port: 587,
+    secure: false,
+    requireTLS: true,
+    family: 4,
+
     auth: {
       user: process.env.GMAIL_USER,
       pass: process.env.GMAIL_APP_PASSWORD.replace(/\s+/g, ''),
     },
+
     tls: {
-      rejectUnauthorized: false,
+      rejectUnauthorized: true,
     },
   });
-  console.log('✉️  Gmail notifications enabled for ' + process.env.GMAIL_USER);
+
+  console.log(
+    '✉️ Gmail notifications enabled for ' + process.env.GMAIL_USER
+  );
+
 } else if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+
   const nodemailer = require('nodemailer');
+
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
     secure: Number(process.env.SMTP_PORT) === 465,
     family: 4,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+
     tls: {
-      rejectUnauthorized: false,
+      rejectUnauthorized: true,
     },
   });
-  console.log('✉️  Email notifications enabled');
+
+  console.log('✉️ Email notifications enabled');
 }
 
 app.use(express.json({ limit: '50kb' }));
