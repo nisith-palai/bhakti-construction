@@ -20,6 +20,10 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const {
+  renderAdminEnquiryEmail,
+  renderCustomerConfirmationEmail,
+} = require('./email-template');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -118,15 +122,47 @@ app.post('/api/enquiry', rateLimit, async (req, res) => {
 
   if (transporter) {
     const sender = process.env.GMAIL_USER || process.env.SMTP_USER;
+    const recipient = process.env.MAIL_TO || sender;
+    const logoPath = path.join(__dirname, 'public', 'images', 'logo-200.png');
+    const attachments = fs.existsSync(logoPath) ? [{
+      filename: 'logo.png',
+      path: logoPath,
+      cid: 'bhakti-logo',
+    }] : [];
+
+    const hostUrl = `${req.protocol}://${req.get('host')}`;
+    const adminMail = renderAdminEnquiryEmail(entry, {
+      adminUrl: `${hostUrl}/admin`,
+    });
+
+    // 1. Send luxury branded lead notification to Admin / Business
     transporter.sendMail({
-      from: `"Bhakti Construction Website" <${sender}>`,
-      to: process.env.MAIL_TO || sender,
+      from: `"Bhakti Construction" <${sender}>`,
+      to: recipient,
       replyTo: entry.email || undefined,
-      subject: `New Enquiry: ${entry.service} – ${entry.name}`,
-      text: Object.entries(entry).map(([k, v]) => `${k}: ${v}`).join('\n'),
+      subject: adminMail.subject,
+      text: adminMail.text,
+      html: adminMail.html,
+      attachments,
     })
-      .then(() => console.log(`✉️  Notification email sent to ${process.env.MAIL_TO || sender}`))
-      .catch((e) => console.error('Email failed:', e.message));
+      .then(() => console.log(`✉️  Lead notification email sent to ${recipient}`))
+      .catch((e) => console.error('Admin email failed:', e.message));
+
+    // 2. If client provided an email address, send an elegant confirmation / thank you email
+    if (entry.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry.email)) {
+      const custMail = renderCustomerConfirmationEmail(entry);
+      transporter.sendMail({
+        from: `"Bhakti Construction" <${sender}>`,
+        to: entry.email,
+        replyTo: recipient,
+        subject: custMail.subject,
+        text: custMail.text,
+        html: custMail.html,
+        attachments,
+      })
+        .then(() => console.log(`✉️  Customer confirmation email sent to ${entry.email}`))
+        .catch((e) => console.error('Customer confirmation email failed:', e.message));
+    }
   }
 
   res.json({ ok: true, message: `Thank you ${entry.name.split(' ')[0]}! Your enquiry has been received. Our team will call you shortly.` });
@@ -166,10 +202,53 @@ app.get('/admin', auth, (req, res) => {
   tr.new{background:#fbf7ee}tr.done{opacity:.6}button{cursor:pointer;border:0;background:#16161a;color:#fff;padding:5px 10px;border-radius:4px;margin:2px 0;width:90px}
   button.del{background:#c0392b}.stats{display:flex;gap:12px;margin-bottom:16px}.stat{background:#fff;padding:14px 20px;border-radius:8px;box-shadow:0 2px 10px #0001}
   .stat b{font-size:24px;display:block;color:#c9a24d}</style></head><body>
-  <header><h2 style="margin:0;display:flex;align-items:center;gap:12px"><img src="/images/logo-200.png" alt="" style="width:52px;height:52px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #c9a24d"> Bhakti Construction – Enquiries</h2><div><a href="/admin/export.csv">⬇ Export CSV</a> <a href="/" style="background:#fff">View Site</a></div></header>
+  <header><h2 style="margin:0;display:flex;align-items:center;gap:12px"><img src="/images/logo-200.png" alt="" style="width:52px;height:52px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #c9a24d"> Bhakti Construction – Enquiries</h2><div><a href="/admin/preview-email" target="_blank" style="background:#16161a;color:#c9a24d;border:1px solid #c9a24d">✉️ Preview Email</a> <a href="/admin/export.csv">⬇ Export CSV</a> <a href="/" style="background:#fff">View Site</a></div></header>
   <div class="wrap"><div class="stats"><div class="stat"><b>${list.length}</b>Total</div><div class="stat"><b>${list.filter((e) => e.status === 'new').length}</b>New</div></div>
   ${list.length ? `<table><tr><th>#</th><th>Date</th><th>Name</th><th>Phone</th><th>Email</th><th>Service</th><th>Location</th><th>Budget</th><th>Message</th><th>Action</th></tr>${rows}</table>` : '<p>No enquiries yet.</p>'}
   </div></body></html>`);
+});
+
+app.get('/admin/preview-email', auth, (req, res) => {
+  const type = req.query.type || 'admin';
+  const list = readAll();
+  const sample = list[0] || {
+    id: crypto.randomUUID(),
+    name: 'Rajesh Kumar Mohanty',
+    phone: '9937828100',
+    email: 'rajesh.mohanty@example.com',
+    service: 'Building Construction',
+    location: 'Patia, Bhubaneswar',
+    budget: '₹20 – 50 Lakh',
+    message: 'Planning to construct a G+2 duplex residential house on a 2400 sq.ft plot. Requesting complete turnkey construction with premium materials and structural engineering support.',
+    source: 'contact-form',
+    createdAt: new Date().toISOString(),
+    status: 'new',
+  };
+
+  const options = {
+    adminUrl: `${req.protocol}://${req.get('host')}/admin`,
+    logoSrc: '/images/logo-200.png',
+  };
+
+  const rendered = type === 'customer' 
+    ? renderCustomerConfirmationEmail(sample, options)
+    : renderAdminEnquiryEmail(sample, options);
+
+  const toolbar = `
+    <div style="background: #0b0b0d; color: #fff; padding: 12px 20px; font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; border-bottom: 2px solid #c9a24d; position: sticky; top: 0; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span style="font-weight: 700; color: #c9a24d; font-size: 15px;">✉️ Email Template Preview</span>
+        <span style="background: #1c1d24; color: #e9cf8a; padding: 4px 10px; border-radius: 4px; font-size: 12px; border: 1px solid #333;">Subject: <b>${esc(rendered.subject)}</b></span>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <a href="/admin/preview-email?type=admin" style="background: ${type === 'admin' ? '#c9a24d' : '#22232b'}; color: ${type === 'admin' ? '#000' : '#fff'}; padding: 7px 14px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600;">Admin Lead Notification</a>
+        <a href="/admin/preview-email?type=customer" style="background: ${type === 'customer' ? '#c9a24d' : '#22232b'}; color: ${type === 'customer' ? '#000' : '#fff'}; padding: 7px 14px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600;">Customer Confirmation</a>
+        <a href="/admin" style="background: transparent; color: #bbb; padding: 7px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; border: 1px solid #555;">← Back to Admin</a>
+      </div>
+    </div>
+  `;
+
+  res.send(toolbar + rendered.html);
 });
 
 app.post('/admin/toggle/:id', auth, (req, res) => {
